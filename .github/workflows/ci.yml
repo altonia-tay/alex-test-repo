@@ -1,0 +1,101 @@
+name: CI/CD Pipeline
+
+on:
+  pull_request:
+    branches: [main, develop]
+  push:
+    branches: [main]
+
+jobs:
+  # Job 1: 代码质量检查
+  quality-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      
+      - name: Lint (Ruff)
+        run: |
+          pip install ruff
+          ruff check . --output-format=github
+        continue-on-error: false
+      
+      - name: Type Check (Pyright)
+        run: |
+          pip install pyright
+          pyright
+        continue-on-error: true
+      
+      - name: Format Check (Black)
+        run: |
+          pip install black
+          black --check .
+        continue-on-error: true
+
+  # Job 2: 单元测试
+  unit-tests:
+    runs-on: ubuntu-latest
+    needs: quality-check
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      
+      - name: Install Dependencies
+        run: pip install -r requirements.txt
+      
+      - name: Run Tests with Coverage
+        run: |
+          pip install pytest pytest-cov
+          pytest --cov=. --cov-report=xml --cov-report=term-missing
+        continue-on-error: false
+      
+      - name: Upload Coverage
+        uses: codecov/codecov-action@v3
+        with:
+          files: ./coverage.xml
+          fail_ci_if_error: false
+
+  # Job 3: 安全扫描 (Snyk)
+  security-scan:
+    runs-on: ubuntu-latest
+    needs: unit-tests
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Setup Snyk
+        uses: snyk/actions/setup@master
+      
+      - name: Snyk Test
+        run: snyk test
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+        continue-on-error: true
+      
+      - name: Snyk Monitor
+        run: snyk monitor
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+
+  # Job 4: 代码质量 (SonarQube)
+  sonarqube:
+    runs-on: ubuntu-latest
+    needs: unit-tests
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      
+      - name: SonarQube Scan
+        uses: SonarSource/sonarqube-scan-action@v4
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
+        continue-on-error: true
